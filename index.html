@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Produção - Tortas Salgadas</title>
+    
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+
     <style>
         /* =========================================
            1. ESTILOS GERAIS
@@ -51,6 +54,14 @@
         .indicador-turno.manha { background-color: #FF8C00; } 
         .indicador-turno.tarde { background-color: #4B0082; } 
         .indicador-turno.diario { background-color: #008080; } 
+
+        .status-conexao {
+            margin-top: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #dc3545; /* Vermelho por padrão (desconectado) */
+        }
+        .status-conexao.online { color: #28a745; } /* Verde quando conectado */
 
         /* =========================================
            2. ABAS (TABS) PARA AS LOJAS
@@ -126,9 +137,7 @@
         }
 
         table.producao th.col-separar, 
-        table.producao td.col-separar {
-            border-left: 5px solid #333; 
-        }
+        table.producao td.col-separar { border-left: 5px solid #333; }
 
         table.producao tbody tr {
             border-bottom: 1px solid #eee;
@@ -205,6 +214,7 @@
         <h1>PRODUÇÃO DE TORTAS SALGADAS</h1>
         <div class="data-atual" id="data-display"></div>
         <div id="indicador-turno" class="indicador-turno">Calculando...</div>
+        <div id="status-conexao" class="status-conexao">🔴 Desconectado do Servidor</div>
     </div>
 
     <div class="abas-container">
@@ -229,106 +239,67 @@
                 </tr>
             </thead>
             <tbody id="lista-producao">
-                </tbody>
+                <tr><td colspan="4" style="text-align:center; padding: 30px;">Carregando dados do servidor...</td></tr>
+            </tbody>
         </table>
     </div>
 
     <script>
+        // ==========================================
+        // CONFIGURAÇÃO DO TEMPO REAL (Conectando na API)
+        // ==========================================
+        const socket = io('http://localhost:3000'); 
+        const statusConexao = document.getElementById('status-conexao');
+
+        let checklist = {
+            'centro_manha': {}, 'centro_tarde': {},
+            'sabugo_diario': {}, 'lages_diario': {}
+        };
+
+        // Quando o aparelho conecta na API com sucesso
+        socket.on('connect', () => {
+            statusConexao.textContent = '🟢 Conectado (Tempo Real)';
+            statusConexao.className = 'status-conexao online';
+        });
+
+        // Quando a API cai ou o aparelho perde a internet
+        socket.on('disconnect', () => {
+            statusConexao.textContent = '🔴 Desconectado (Tentando reconectar...)';
+            statusConexao.className = 'status-conexao';
+        });
+
+        // Recebe a carga inicial de dados assim que abre a tela
+        socket.on('sincronizarInicial', (dados) => {
+            checklist = dados.checklist;
+            renderizarTelas();
+        });
+
+        // Escuta as atualizações de outros aparelhos em tempo real
+        socket.on('atualizarPainel', (novaMemoria) => {
+            checklist = novaMemoria;
+            renderizarTelas();
+        });
+
+        // ==========================================
+        // LÓGICA DO PAINEL (Variáveis e Produtos)
+        // ==========================================
         let unidadeAtual = 'centro';
         let turnoAtual = ''; 
-        let hoje = new Date(); // Relógio automático mantido!
+        let hoje = new Date();
 
-        /* DADOS DA PLANILHA 
-           Os índices do array representam:
-           [0] Domingo, [1] Segunda, [2] Terça, [3] Quarta, [4] Quinta, [5] Sexta, [6] Sábado
-        */
         const produtos = [
-            { id: 1, nome: "Empadão", 
-              centroManha: [1, 5, 5, 5, 6, 6, 5], centroTarde: [1, 0, 0, 0, 0, 1, 1], 
-              sabugo: [0, 1, 1, 1, 1, 1, 2], lages: [0, 2, 2, 2, 2, 2, 2] },
-            
-            { id: 2, nome: "Torta Salgada (pão de forma)", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], 
-              sabugo: [0, 1, 1, 1, 1, 1, 1], lages: [0, 1, 1, 1, 1, 1, 1] },
-            
-            { id: 3, nome: "Lasanha de Carne", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 1, 0, 0], 
-              sabugo: [0, 0, 1, 0, 0, 0, 0], lages: [0, 0, 1, 0, 1, 0, 1] },
-            
-            { id: 4, nome: "Lasanha de Frango", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 1, 0], 
-              sabugo: [0, 0, 0, 0, 1, 0, 0], lages: [0, 1, 0, 1, 0, 1, 0] },
-            
-            { id: 5, nome: "Panqueca Carne", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 1, 0, 0, 0, 0, 0], 
-              sabugo: [0, 0, 0, 0, 1, 0, 0], lages: [0, 1, 0, 1, 0, 0, 0] },
-            
-            { id: 6, nome: "Panqueca Frango", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], 
-              sabugo: [0, 0, 0, 1, 0, 0, 0], lages: [0, 0, 0, 0, 1, 0, 1] },
-            
-            { id: 7, nome: "Misto de Forno", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], 
-              sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 1, 0, 0, 1, 0] },
-            
-            { id: 8, nome: "Escondidinho Carne", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 1, 0, 0], 
-              sabugo: [0, 0, 0, 0, 0, 1, 0], lages: [0, 0, 1, 0, 1, 0, 0] },
-            
-            { id: 9, nome: "Torta Napolitana", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 1, 0, 0, 1, 0], 
-              sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 0, 1, 0, 0, 1] },
-            
-            { id: 10, nome: "Torta Frango", 
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 1, 0, 0, 0], 
-              sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 1, 0, 0, 1, 0, 0] },
-            
-            { id: 11, BLANK_NOME: "Torta Alho Poró", nome: "Torta Alho Poró",
-              centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], 
-              sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 0, 0, 0, 0, 0] }
+            { id: 1, nome: "Empadão", centroManha: [1, 5, 5, 5, 6, 6, 5], centroTarde: [1, 0, 0, 0, 0, 1, 1], sabugo: [0, 1, 1, 1, 1, 1, 2], lages: [0, 2, 2, 2, 2, 2, 2] },
+            { id: 2, nome: "Torta Salgada (pão de forma)", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], sabugo: [0, 1, 1, 1, 1, 1, 1], lages: [0, 1, 1, 1, 1, 1, 1] },
+            { id: 3, nome: "Lasanha de Carne", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 1, 0, 0], sabugo: [0, 0, 1, 0, 0, 0, 0], lages: [0, 0, 1, 0, 1, 0, 1] },
+            { id: 4, nome: "Lasanha de Frango", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 1, 0], sabugo: [0, 0, 0, 0, 1, 0, 0], lages: [0, 1, 0, 1, 0, 1, 0] },
+            { id: 5, nome: "Panqueca Carne", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 1, 0, 0, 0, 0, 0], sabugo: [0, 0, 0, 0, 1, 0, 0], lages: [0, 1, 0, 1, 0, 0, 0] },
+            { id: 6, nome: "Panqueca Frango", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], sabugo: [0, 0, 0, 1, 0, 0, 0], lages: [0, 0, 0, 0, 1, 0, 1] },
+            { id: 7, nome: "Misto de Forno", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 1, 0, 0, 1, 0] },
+            { id: 8, nome: "Escondidinho Carne", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 1, 0, 0], sabugo: [0, 0, 0, 0, 0, 1, 0], lages: [0, 0, 1, 0, 1, 0, 0] },
+            { id: 9, nome: "Torta Napolitana", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 1, 0, 0, 1, 0], sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 0, 1, 0, 0, 1] },
+            { id: 10, nome: "Torta Frango", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 1, 0, 0, 0], sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 1, 0, 0, 1, 0, 0] },
+            { id: 11, nome: "Torta Alho Poró", centroManha: [0, 1, 1, 1, 1, 1, 1], centroTarde: [0, 0, 0, 0, 0, 0, 0], sabugo: [0, 0, 0, 0, 0, 0, 0], lages: [0, 0, 0, 0, 0, 0, 0] }
         ];
-
-        /* ==============================================================
-           INICIALIZAR MEMÓRIA (Com versão 3 e BLINDAGEM contra erros)
-           ============================================================== */
-        let checklist = {};
-        const dataHojeStr = hoje.toLocaleDateString();
-        
-        try {
-            const memoriaSalva = localStorage.getItem('checklistTortas_v3');
-            const dataSalva = localStorage.getItem('dataSalvaTortas_v3');
-            
-            if (memoriaSalva && dataSalva === dataHojeStr) {
-                checklist = JSON.parse(memoriaSalva);
-            } else {
-                criarMemoriaNova();
-            }
-        } catch (e) {
-            criarMemoriaNova();
-        }
-
-        function criarMemoriaNova() {
-            checklist = {
-                'centro_manha': {}, 'centro_tarde': {},
-                'sabugo_diario': {}, 'lages_diario': {}
-            };
-            produtos.forEach(p => {
-                checklist['centro_manha'][`id_${p.id}`] = { produzir: false, separar: false };
-                checklist['centro_tarde'][`id_${p.id}`] = { produzir: false, separar: false };
-                checklist['sabugo_diario'][`id_${p.id}`] = { produzir: false, separar: false };
-                checklist['lages_diario'][`id_${p.id}`] = { produzir: false, separar: false };
-            });
-            salvarMemoria(true);
-        }
-
-        function salvarMemoria(salvarData = false) {
-            try {
-                localStorage.setItem('checklistTortas_v3', JSON.stringify(checklist));
-                if (salvarData) {
-                    localStorage.setItem('dataSalvaTortas_v3', dataHojeStr);
-                }
-            } catch(e) { console.error("Erro ao salvar no localStorage", e); }
-        }
 
         function obterStatusSeguro(chave, id, acao) {
             if (checklist[chave] && checklist[chave][`id_${id}`]) {
@@ -391,7 +362,6 @@
                 const diaAtual = hoje.getDay(); 
                 const diaSeguinte = (diaAtual + 1) % 7; 
 
-                // Adaptação Visual da Terceira Coluna
                 if (unidadeAtual === 'centro') {
                     tituloPreparacao.style.backgroundColor = '#007BFF'; 
                     colSepararHeader2.textContent = 'AÇÃO (Freezer)';
@@ -450,16 +420,11 @@
 
                     const tdProduto = `<td class="col-produto"><span class="nome-produto">${produto.nome}</span></td>`;
 
-                    // Coluna 1: Meta de Produção
                     let tdMeta = '<td class="col-meta">';
-                    if (metaProduzir > 0) {
-                        tdMeta += `<span class="qtd-meta">${metaProduzir} un.</span>`;
-                    } else {
-                        tdMeta += `<span class="texto-zero">-</span>`;
-                    }
+                    if (metaProduzir > 0) tdMeta += `<span class="qtd-meta">${metaProduzir} un.</span>`;
+                    else tdMeta += `<span class="texto-zero">-</span>`;
                     tdMeta += '</td>';
 
-                    // Coluna 2: Botão de Produzir (ATUALIZADO COM O CHECK E TEXTO NOVO)
                     let tdAcao = '<td class="col-acao">';
                     if (metaProduzir > 0) {
                         const textoBotao = statusProduzir ? '✔️ Realizado' : 'Produzir';
@@ -470,24 +435,17 @@
                     }
                     tdAcao += '</td>';
 
-                    // Coluna 3: Ação (Centro) ou Visualização (Sabugo/Lages)
                     let tdSeparar = `<td class="col-separar">`;
                     if (unidadeAtual === 'centro') {
                         if (metaSeparar > 0) {
                             const textoBotaoSep = statusSeparar ? '✔️ Separado' : 'Separar';
                             const classeBotaoSep = statusSeparar ? 'btn-separar concluido' : 'btn-separar';
-                            
                             tdSeparar += `<div>Meta: <strong>${metaSeparar} un.</strong></div>`;
                             tdSeparar += `<button class="${classeBotaoSep}" onclick="marcarFeito(${produto.id}, 'separar')">${textoBotaoSep}</button>`;
-                        } else {
-                            tdSeparar += `<span class="texto-zero">-</span>`;
-                        }
+                        } else tdSeparar += `<span class="texto-zero">-</span>`;
                     } else {
-                        if (metaAmanha > 0) {
-                            tdSeparar += `<span class="qtd-meta" style="color: #6c757d;">${metaAmanha} un.</span>`;
-                        } else {
-                            tdSeparar += `<span class="texto-zero">-</span>`;
-                        }
+                        if (metaAmanha > 0) tdSeparar += `<span class="qtd-meta" style="color: #6c757d;">${metaAmanha} un.</span>`;
+                        else tdSeparar += `<span class="texto-zero">-</span>`;
                     }
                     tdSeparar += '</td>';
 
@@ -501,34 +459,31 @@
 
             } catch (erro) {
                 console.error("Erro renderizando a tabela:", erro);
-                container.innerHTML = `<tr><td colspan="4" class="mensagem-erro">Ops! Houve um erro de atualização. Por favor, recarregue a página (F5).<br>Detalhe: ${erro.message}</td></tr>`;
             }
         }
 
+        // AGORA O CLIQUE AVISA O SERVIDOR!
         function marcarFeito(produtoId, tipoAcao) {
             let chaveEstado = `${unidadeAtual}_${turnoAtual}`;
-            if (checklist[chaveEstado] && checklist[chaveEstado][`id_${produtoId}`]) {
-                checklist[chaveEstado][`id_${produtoId}`][tipoAcao] = !checklist[chaveEstado][`id_${produtoId}`][tipoAcao];
-                salvarMemoria();
-                renderizarTelas(); 
-            }
+            
+            // Otimismo: Atualiza a tela localmente para não ter atraso no clique
+            if (!checklist[chaveEstado]) checklist[chaveEstado] = {};
+            if (!checklist[chaveEstado][`id_${produtoId}`]) checklist[chaveEstado][`id_${produtoId}`] = { produzir: false, separar: false };
+            checklist[chaveEstado][`id_${produtoId}`][tipoAcao] = !checklist[chaveEstado][`id_${produtoId}`][tipoAcao];
+            renderizarTelas(); 
+
+            // Avisa o servidor para espalhar para todo mundo
+            socket.emit('marcarAcao', { chaveEstado, produtoId, tipoAcao });
         }
 
         exibirData(); 
         verificarHorarioETurno(); 
-        renderizarTelas();
 
         setInterval(() => {
-            let diaAntigo = dataHojeStr;
-            hoje = new Date(); // Relógio automático intocável!
+            hoje = new Date(); 
             exibirData(); 
-            
-            if(diaAntigo !== hoje.toLocaleDateString()) {
-                window.location.reload();
-            } else {
-                verificarHorarioETurno(); 
-                renderizarTelas();
-            }
+            verificarHorarioETurno(); 
+            renderizarTelas();
         }, 60000);
 
     </script>
