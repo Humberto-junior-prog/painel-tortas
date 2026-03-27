@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel do Gerente - Tortas Salgadas</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; padding: 20px; color: #333; }
+        h1 { text-align: center; color: #1a1a1a; }
+        .aviso { text-align: center; color: #666; margin-bottom: 20px; }
+        
+        button { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-adicionar { background-color: #0d6efd; color: white; margin-bottom: 20px; width: 100%; font-size: 16px; }
+        .btn-adicionar:hover { background-color: #0b5ed7; }
+        
+        .acoes-produto { float: right; display: flex; gap: 5px; }
+        .btn-mover { background-color: #6c757d; color: white; padding: 8px 12px; font-size: 16px; }
+        .btn-mover:hover { background-color: #5c636a; }
+        .btn-mover:disabled { background-color: #cccccc; cursor: not-allowed; opacity: 0.5; }
+        .btn-remover { background-color: #dc3545; color: white; padding: 8px 12px; }
+        
+        .btn-salvar { background-color: #198754; color: white; width: 100%; font-size: 18px; margin-top: 20px; padding: 15px; }
+        .btn-salvar:hover { background-color: #157347; }
+        
+        .produto-card { background: white; padding: 20px; margin-bottom: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #FF8C00; }
+        .campo-grupo { margin-bottom: 15px; clear: both; padding-top: 10px; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; color: #555; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 15px; }
+        input:focus { border-color: #FF8C00; outline: none; }
+        small { color: #888; display: block; margin-top: 2px; }
+        .loja-titulo { font-size: 14px; color: #007BFF; font-weight: bold; margin-top: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px;}
+    </style>
+</head>
+<body>
+
+    <h1>🥧 Gerenciador - Tortas Salgadas</h1>
+    <p class="aviso">Altere as metas das lojas, adicione tortas ou reorganize a lista.</p>
+
+    <button class="btn-adicionar" onclick="adicionarProduto()">➕ Adicionar Nova Torta/Produto</button>
+
+    <div id="lista-produtos">
+        <p style="text-align: center;">Carregando produtos do servidor...</p>
+    </div>
+
+    <button class="btn-salvar" onclick="salvarTudo()">💾 SALVAR TODAS AS ALTERAÇÕES</button>
+
+    <script>
+        // ATENÇÃO: Cole aqui o link oficial da sua API do Render das tortas
+        const API_URL = 'COLE_AQUI_O_SEU_LINK_DO_RENDER/produtos'; 
+        let produtos = [];
+
+        async function carregarProdutos() {
+            try {
+                const resposta = await fetch(API_URL);
+                if (!resposta.ok) throw new Error("API não encontrou os produtos");
+                produtos = await resposta.json();
+                desenharTela();
+            } catch (erro) {
+                document.getElementById('lista-produtos').innerHTML = '<p style="color:red; text-align:center;">Erro ao conectar. O servidor pode estar dormindo ou precisa ser configurado primeiro.</p>';
+            }
+        }
+
+        function desenharTela() {
+            const divLista = document.getElementById('lista-produtos');
+            divLista.innerHTML = ''; 
+
+            produtos.forEach((produto, index) => {
+                const div = document.createElement('div');
+                div.className = 'produto-card';
+                
+                div.innerHTML = `
+                    <div class="acoes-produto">
+                        <button class="btn-mover" onclick="moverParaCima(${index})" title="Subir" ${index === 0 ? 'disabled' : ''}>⬆️</button>
+                        <button class="btn-mover" onclick="moverParaBaixo(${index})" title="Descer" ${index === produtos.length - 1 ? 'disabled' : ''}>⬇️</button>
+                        <button class="btn-remover" onclick="removerProduto(${index})">🗑️ Excluir</button>
+                    </div>
+                    
+                    <div class="campo-grupo">
+                        <label>Nome do Produto:</label>
+                        <input type="text" value="${produto.nome}" onchange="atualizarNome(${index}, this.value)">
+                    </div>
+
+                    <div class="loja-titulo">🏢 LOJA CENTRO</div>
+                    <div class="campo-grupo">
+                        <label>☀️ Metas Manhã (Centro):</label>
+                        <input type="text" value="${produto.centroManha.join(', ')}" onchange="atualizarMetas(${index}, 'centroManha', this.value)">
+                        <small>7 números (Dom a Sáb). Ex: 0, 5, 5, 5, 6, 6, 5</small>
+                    </div>
+                    <div class="campo-grupo">
+                        <label>🌙 Metas Tarde (Centro):</label>
+                        <input type="text" value="${produto.centroTarde.join(', ')}" onchange="atualizarMetas(${index}, 'centroTarde', this.value)">
+                    </div>
+
+                    <div class="loja-titulo">🏪 OUTRAS LOJAS</div>
+                    <div class="campo-grupo">
+                        <label>📦 Metas Sabugo (Diário):</label>
+                        <input type="text" value="${produto.sabugo.join(', ')}" onchange="atualizarMetas(${index}, 'sabugo', this.value)">
+                    </div>
+                    <div class="campo-grupo">
+                        <label>📦 Metas Lages (Diário):</label>
+                        <input type="text" value="${produto.lages.join(', ')}" onchange="atualizarMetas(${index}, 'lages', this.value)">
+                    </div>
+                `;
+                divLista.appendChild(div);
+            });
+        }
+
+        function atualizarNome(index, novoNome) {
+            produtos[index].nome = novoNome;
+        }
+
+        function atualizarMetas(index, chaveDaLoja, valorDigitado) {
+            const arrayNumeros = valorDigitado.split(',').map(num => Number(num.trim()) || 0);
+            produtos[index][chaveDaLoja] = arrayNumeros;
+        }
+
+        function moverParaCima(index) {
+            if (index > 0) {
+                const itemMovido = produtos[index];
+                produtos[index] = produtos[index - 1]; 
+                produtos[index - 1] = itemMovido;      
+                desenharTela();
+            }
+        }
+
+        function moverParaBaixo(index) {
+            if (index < produtos.length - 1) {
+                const itemMovido = produtos[index];
+                produtos[index] = produtos[index + 1]; 
+                produtos[index + 1] = itemMovido;      
+                desenharTela();
+            }
+        }
+
+        function adicionarProduto() {
+            let maiorId = 0;
+            produtos.forEach(p => { if(p.id > maiorId) maiorId = p.id; });
+
+            const novoProduto = {
+                id: maiorId + 1,
+                nome: "Nova Torta",
+                centroManha: Array(0,0,0,0,0,0,0),
+                centroTarde: Array(0,0,0,0,0,0,0),
+                sabugo: Array(0,0,0,0,0,0,0),
+                lages: Array(0,0,0,0,0,0,0)
+            };
+            
+            produtos.unshift(novoProduto);
+            desenharTela();
+            window.scrollTo(0, 0); 
+        }
+
+        function removerProduto(index) {
+            const nomeTorta = produtos[index].nome;
+            if(confirm('Tem certeza que deseja apagar a ' + nomeTorta + '?')) {
+                produtos.splice(index, 1);
+                desenharTela();
+            }
+        }
+
+        async function salvarTudo() {
+            const botao = document.querySelector('.btn-salvar');
+            botao.innerHTML = '⏳ Salvando no Servidor...';
+            
+            try {
+                const resposta = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(produtos) 
+                });
+                
+                if(resposta.ok) {
+                    alert("✅ Metas das tortas salvas com sucesso!");
+                } else {
+                    throw new Error("Erro no servidor");
+                }
+            } catch (erro) {
+                alert("Erro ao salvar. Verifique se a API está online e configurada.");
+            } finally {
+                botao.innerHTML = '💾 SALVAR TODAS AS ALTERAÇÕES';
+            }
+        }
+
+        carregarProdutos();
+    </script>
+</body>
+</html>
